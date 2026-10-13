@@ -1,7 +1,6 @@
 """
 CLI Coding-Decoding Trainer.
-Meta section has three families (Alphabet, Coding, Number Series)
-plus a unified cross-family mode.
+Meta section has four families: Alphabet, Coding, Number Series, Clock.
 """
 
 import json
@@ -13,6 +12,7 @@ from itertools import combinations
 
 import code_decode_mod
 import number_series_mod
+import clock_mod
 
 
 ALPHABETS = "abcdefghijklmnopqrstuvwxyz"
@@ -50,18 +50,28 @@ def clr(t, c):
 # Question
 # ------------------------------------------------------------------
 class Question:
-    def __init__(self, prompt, answer, hint="", qtype=""):
+    def __init__(self, prompt, answer, hint="", qtype="", tolerance=None):
         self.prompt = prompt
         self.answer = str(answer).strip().lower()
         self.hint = hint
         self.qtype = qtype
+        self.tolerance = tolerance
         self.user_answer = None
         self.is_correct = False
         self.time_sec = 0.0
 
     def check(self, user_input):
         self.user_answer = str(user_input).strip().lower()
-        self.is_correct = self.user_answer == self.answer
+        if self.tolerance is not None:
+            try:
+                self.is_correct = (
+                    abs(float(self.user_answer) - float(self.answer))
+                    <= self.tolerance
+                )
+            except ValueError:
+                self.is_correct = False
+        else:
+            self.is_correct = self.user_answer == self.answer
         return self.is_correct
 
     def to_dict(self):
@@ -175,6 +185,8 @@ def all_types_registry():
         reg[f"coding:{k}"] = ("coding", k, f"[C] {code_decode_mod.LABELS[k]}")
     for k in number_series_mod.BUILDERS:
         reg[f"series:{k}"] = ("series", k, f"[S] {number_series_mod.LABELS[k]}")
+    for k in clock_mod.BUILDERS:
+        reg[f"clock:{k}"] = ("clock", k, f"[K] {clock_mod.LABELS[k]}")
     return reg
 
 
@@ -215,15 +227,28 @@ def generate_number_series_questions(types, count):
     return out
 
 
+def generate_clock_questions(types, count):
+    type_picker = (
+        CooldownPicker(types, cooldown=min(2, len(types) - 1))
+        if len(types) > 1 else None
+    )
+    bags = {t: Bag(clock_mod.PARAMS[t]) for t in types}
+    out = []
+    for _ in range(count):
+        qtype = types[0] if type_picker is None else type_picker.pick()
+        param = bags[qtype].pick()
+        out.append(Question(**clock_mod.BUILDERS[qtype](param)))
+    return out
+
+
 # ------------------------------------------------------------------
 # Unified cross-family generator
 # ------------------------------------------------------------------
 def generate_mixed_questions(fq_keys, count):
-    """Draw from any combination of family-qualified keys."""
     type_picker = CooldownPicker(fq_keys, cooldown=min(3, len(fq_keys) - 1))
     letter_picker = CooldownPicker(ALPHABETS, cooldown=5)
     word_picker = CooldownPicker(code_decode_mod.WORDS, cooldown=5)
-    series_bags = {}
+    bags = {}
 
     out = []
     for _ in range(count):
@@ -236,13 +261,18 @@ def generate_mixed_questions(fq_keys, count):
             word = word_picker.pick()
             data = code_decode_mod.GENERATORS[key](word)
             out.append(Question(**data))
-        else:  # series
-            if key not in series_bags:
-                series_bags[key] = Bag(number_series_mod.PARAMS[key])
-            param = series_bags[key].pick()
+        elif family == "series":
+            if key not in bags:
+                bags[key] = Bag(number_series_mod.PARAMS[key])
+            param = bags[key].pick()
             data = number_series_mod.BUILDERS[key](param)
             data.pop("difficulty", None)
             out.append(Question(**data))
+        else:  # clock
+            if key not in bags:
+                bags[key] = Bag(clock_mod.PARAMS[key])
+            param = bags[key].pick()
+            out.append(Question(**clock_mod.BUILDERS[key](param)))
     return out
 
 
@@ -435,7 +465,8 @@ class CLIUserInterface:
             print("  1) Alphabet drills")
             print("  2) Coding-Decoding drills")
             print("  3) Number Series drills")
-            print("  4) Unified mixed drills (any family)")
+            print("  4) Clock drills")
+            print("  5) Unified mixed drills (any family)")
             print("  q) Back to main menu")
             choice = input(clr("Choose: ", C.YELLOW)).strip().lower()
 
@@ -448,6 +479,8 @@ class CLIUserInterface:
             elif choice == "3":
                 self.number_series_menu()
             elif choice == "4":
+                self.clock_menu()
+            elif choice == "5":
                 self.mixed_menu()
             else:
                 print(clr("Invalid choice.", C.RED))
@@ -552,6 +585,48 @@ class CLIUserInterface:
 
             questions = generate_number_series_questions(types, n)
             label = "series:" + ",".join(types)
+            self._run_questions(questions, label, "meta")
+
+    # ---------- Clock submenu ----------
+    def clock_menu(self):
+        while True:
+            print(clr("\n── Clock Drills ──", C.BOLD))
+            keys = list(clock_mod.BUILDERS.keys())
+            for i, k in enumerate(keys, 1):
+                print(f"  {i}) {clock_mod.LABELS[k]}")
+            n_all = len(keys)
+            print(f"  {n_all + 1}) All types mixed")
+            print(f"  {n_all + 2}) Custom subset")
+            print("  q) Back")
+            choice = input(clr("Choose: ", C.YELLOW)).strip().lower()
+
+            if choice == "q":
+                return
+
+            if not choice.isdigit():
+                print(clr("Invalid choice.", C.RED))
+                continue
+
+            c = int(choice)
+            if 1 <= c <= n_all:
+                types = [keys[c - 1]]
+            elif c == n_all + 1:
+                types = keys
+            elif c == n_all + 2:
+                types = self._pick_subset(keys, clock_mod.LABELS)
+                if not types:
+                    continue
+            else:
+                print(clr("Invalid choice.", C.RED))
+                continue
+
+            try:
+                n = int(input("Questions? [default 10]: ").strip() or "10")
+            except ValueError:
+                n = 10
+
+            questions = generate_clock_questions(types, n)
+            label = "clock:" + ",".join(types)
             self._run_questions(questions, label, "meta")
 
     # ---------- Unified mixed submenu ----------
@@ -722,8 +797,8 @@ class CLIUserInterface:
 
 def main():
     ensure_dirs()
-    username = input("Username [default]: ").strip() or "default"
     try:
+        username = input("Username [default]: ").strip() or "default"
         CLIUserInterface(username).main_loop()
     except (KeyboardInterrupt, EOFError):
         print(clr("\n\nInterrupted. Bye!", C.CYAN))
