@@ -1,6 +1,7 @@
 """
 CLI Coding-Decoding Trainer.
-Meta section has three families: Alphabet, Coding, Number Series.
+Meta section has three families (Alphabet, Coding, Number Series)
+plus a unified cross-family mode.
 """
 
 import json
@@ -163,7 +164,22 @@ ALPHABET_MODES = _all_subsets(ALPHABET_ATOMS)
 
 
 # ------------------------------------------------------------------
-# Question-set generators
+# Unified registry across all families
+# ------------------------------------------------------------------
+def all_types_registry():
+    """Return {fq_key: (family, key, label)} for every type across families."""
+    reg = {}
+    for k in ALPHABET_GENERATORS:
+        reg[f"alphabet:{k}"] = ("alphabet", k, f"[A] {ALPHABET_ATOMS[k]}")
+    for k in code_decode_mod.GENERATORS:
+        reg[f"coding:{k}"] = ("coding", k, f"[C] {code_decode_mod.LABELS[k]}")
+    for k in number_series_mod.BUILDERS:
+        reg[f"series:{k}"] = ("series", k, f"[S] {number_series_mod.LABELS[k]}")
+    return reg
+
+
+# ------------------------------------------------------------------
+# Question-set generators (per family)
 # ------------------------------------------------------------------
 def generate_alphabet_questions(types, count, cooldown=5):
     picker = CooldownPicker(ALPHABETS, cooldown=cooldown)
@@ -196,6 +212,37 @@ def generate_number_series_questions(types, count):
         data = number_series_mod.BUILDERS[qtype](param)
         data.pop("difficulty", None)
         out.append(Question(**data))
+    return out
+
+
+# ------------------------------------------------------------------
+# Unified cross-family generator
+# ------------------------------------------------------------------
+def generate_mixed_questions(fq_keys, count):
+    """Draw from any combination of family-qualified keys."""
+    type_picker = CooldownPicker(fq_keys, cooldown=min(3, len(fq_keys) - 1))
+    letter_picker = CooldownPicker(ALPHABETS, cooldown=5)
+    word_picker = CooldownPicker(code_decode_mod.WORDS, cooldown=5)
+    series_bags = {}
+
+    out = []
+    for _ in range(count):
+        fq = type_picker.pick()
+        family, key = fq.split(":", 1)
+
+        if family == "alphabet":
+            out.append(ALPHABET_GENERATORS[key](letter_picker.pick()))
+        elif family == "coding":
+            word = word_picker.pick()
+            data = code_decode_mod.GENERATORS[key](word)
+            out.append(Question(**data))
+        else:  # series
+            if key not in series_bags:
+                series_bags[key] = Bag(number_series_mod.PARAMS[key])
+            param = series_bags[key].pick()
+            data = number_series_mod.BUILDERS[key](param)
+            data.pop("difficulty", None)
+            out.append(Question(**data))
     return out
 
 
@@ -366,6 +413,21 @@ class CLIUserInterface:
             print(clr("No valid types selected.", C.RED))
         return picked
 
+    def _pick_registry_subset(self, keys, registry):
+        print("Enter type numbers, comma-separated (e.g. 1,5,20):")
+        for i, k in enumerate(keys, 1):
+            print(f"  {i}) {registry[k][2]}")
+        raw = input("  > ").strip()
+        try:
+            idxs = [int(x.strip()) - 1 for x in raw.split(",") if x.strip()]
+        except ValueError:
+            print(clr("Invalid input.", C.RED))
+            return []
+        picked = [keys[i] for i in idxs if 0 <= i < len(keys)]
+        if not picked:
+            print(clr("No valid types selected.", C.RED))
+        return picked
+
     # ---------- Meta: family selector ----------
     def meta_menu(self):
         while True:
@@ -373,6 +435,7 @@ class CLIUserInterface:
             print("  1) Alphabet drills")
             print("  2) Coding-Decoding drills")
             print("  3) Number Series drills")
+            print("  4) Unified mixed drills (any family)")
             print("  q) Back to main menu")
             choice = input(clr("Choose: ", C.YELLOW)).strip().lower()
 
@@ -384,6 +447,8 @@ class CLIUserInterface:
                 self.coding_menu()
             elif choice == "3":
                 self.number_series_menu()
+            elif choice == "4":
+                self.mixed_menu()
             else:
                 print(clr("Invalid choice.", C.RED))
 
@@ -487,6 +552,50 @@ class CLIUserInterface:
 
             questions = generate_number_series_questions(types, n)
             label = "series:" + ",".join(types)
+            self._run_questions(questions, label, "meta")
+
+    # ---------- Unified mixed submenu ----------
+    def mixed_menu(self):
+        registry = all_types_registry()
+        keys = list(registry.keys())
+
+        while True:
+            print(clr("\n── Unified Mixed Drills ──", C.BOLD))
+            for i, k in enumerate(keys, 1):
+                print(f"  {i}) {registry[k][2]}")
+            n_all = len(keys)
+            print(f"  {n_all + 1}) Everything mixed")
+            print(f"  {n_all + 2}) Custom subset")
+            print("  q) Back")
+            choice = input(clr("Choose: ", C.YELLOW)).strip().lower()
+
+            if choice == "q":
+                return
+
+            if not choice.isdigit():
+                print(clr("Invalid choice.", C.RED))
+                continue
+
+            c = int(choice)
+            if 1 <= c <= n_all:
+                fq_keys = [keys[c - 1]]
+            elif c == n_all + 1:
+                fq_keys = keys
+            elif c == n_all + 2:
+                fq_keys = self._pick_registry_subset(keys, registry)
+                if not fq_keys:
+                    continue
+            else:
+                print(clr("Invalid choice.", C.RED))
+                continue
+
+            try:
+                n = int(input("Questions? [default 20]: ").strip() or "20")
+            except ValueError:
+                n = 20
+
+            questions = generate_mixed_questions(fq_keys, n)
+            label = "mixed:" + ",".join(fq_keys)
             self._run_questions(questions, label, "meta")
 
     # ---------- Custom quiz bank submenu ----------

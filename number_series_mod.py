@@ -5,21 +5,23 @@ Each pattern exposes:
     BUILDERS[qtype] -> function that turns a param tuple into a question dict
 """
 
-import math
 import random
 
 
 PRIMES = [
     2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47,
     53, 59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107,
-    109, 113, 127, 131, 137, 139, 149, 151, 157, 163, 167, 173,
+    109, 113]
+
+"""
+# 127, 131, 137, 139, 149, 151, 157, 163, 167, 173,
     179, 181, 191, 193, 197, 199, 211, 223, 227, 229, 233, 239,
     241, 251, 257, 263, 269, 271, 277, 281, 283, 293, 307, 311,
     313, 317, 331, 337, 347, 349, 353, 359, 367, 373, 379, 383,
     389, 397, 401, 409, 419, 421, 431, 433, 439, 443, 449, 457,
     461, 463, 467, 479, 487, 491, 499, 503, 509, 521, 523, 541,
 ]
-
+"""
 
 def _fmt(seq):
     return ", ".join(map(str, seq)) + ", ?"
@@ -50,6 +52,43 @@ def _build_geometric(p):
     return _q(seq, a * (r ** 5), f"Multiply by {r} each step.", "geometric", 1)
 
 
+def _build_subtraction(p):
+    a, d = p
+    seq = [a - d * i for i in range(5)]
+    return _q(seq, a - d * 5, f"Subtract {d} each step.", "subtraction", 1)
+
+
+def _build_division(p):
+    a, r = p
+    start = a * (r ** 5)
+    seq = [start // (r ** i) for i in range(5)]
+    return _q(seq, a, f"Divide by {r} each step.", "division", 2)
+
+
+def _build_fibonacci(p):
+    a, b = p
+    seq = [a, b]
+    for _ in range(3):
+        seq.append(seq[-1] + seq[-2])
+    return _q(
+        seq, seq[-1] + seq[-2],
+        "Each term = sum of the previous two.",
+        "fibonacci", 1,
+    )
+
+
+def _build_prod_prev_two(p):
+    a, b = p
+    seq = [a, b]
+    for _ in range(3):
+        seq.append(seq[-1] * seq[-2])
+    return _q(
+        seq, seq[-1] * seq[-2],
+        "Each term = product of the previous two.",
+        "prod_prev_two", 3,
+    )
+
+
 def _build_squares(p):
     start, c = p
     seq = [(start + i) ** 2 + c for i in range(5)]
@@ -74,13 +113,6 @@ def _build_prime(p):
     start = p[0]
     seq = PRIMES[start:start + 5]
     return _q(seq, PRIMES[start + 5], "Consecutive primes.", "prime", 2)
-
-
-def _build_factorial(p):
-    start, c = p
-    seq = [math.factorial(start + i) + c for i in range(4)]
-    hint = "Factorials: n!" if c == 0 else f"Factorials + {c}"
-    return _q(seq, math.factorial(start + 4) + c, hint, "factorial", 2)
 
 
 def _build_diff_of_diff(p):
@@ -213,10 +245,17 @@ _N_PRIMES = len(PRIMES)
 PARAMS = {
     "arithmetic":    [(a, d) for a in range(2, 31) for d in range(2, 16)],
     "geometric":     [(a, r) for a in range(1, 11) for r in range(2, 7)],
+    "subtraction":   [(a, d) for a in range(60, 200, 5) for d in range(2, 10)],
+    "division":      ([(a, 2) for a in range(1, 21)]
+                      + [(a, 3) for a in range(1, 8)]
+                      + [(a, 4) for a in range(1, 4)]),
+    "fibonacci":     [(a, b) for a in range(1, 11) for b in range(1, 11)],
+    "prod_prev_two": [(1, 2), (1, 3), (1, 4),
+                      (2, 1), (2, 3), (2, 4),
+                      (3, 1), (3, 2)],
     "squares":       [(s, c) for s in range(1, 11) for c in range(0, 11)],
     "cubes":         [(s, c) for s in range(1, 11) for c in range(0, 11)],
     "prime":         [(i,) for i in range(0, _N_PRIMES - 6)],
-    "factorial":     [(n, c) for n in range(1, 3) for c in range(0, 13)],
     "diff_of_diff":  [(a, d, i)
                       for a in range(1, 21)
                       for d in range(2, 11)
@@ -242,10 +281,13 @@ PARAMS = {
 BUILDERS = {
     "arithmetic":    _build_arithmetic,
     "geometric":     _build_geometric,
+    "subtraction":   _build_subtraction,
+    "division":      _build_division,
+    "fibonacci":     _build_fibonacci,
+    "prod_prev_two": _build_prod_prev_two,
     "squares":       _build_squares,
     "cubes":         _build_cubes,
     "prime":         _build_prime,
-    "factorial":     _build_factorial,
     "diff_of_diff":  _build_diff_of_diff,
     "alt_primes":    _build_alt_primes,
     "square_plus":   _build_square_plus,
@@ -260,10 +302,13 @@ BUILDERS = {
 LABELS = {
     "arithmetic":    "Arithmetic (+d)",
     "geometric":     "Geometric (×r)",
+    "subtraction":   "Subtraction (−d)",
+    "division":      "Division (÷r)",
+    "fibonacci":     "Fibonacci (sum of prev 2)",
+    "prod_prev_two": "Product of prev 2",
     "squares":       "Squares (n²+c)",
     "cubes":         "Cubes (n³+c)",
     "prime":         "Primes",
-    "factorial":     "Factorials (n!+c)",
     "diff_of_diff":  "Difference of differences",
     "alt_primes":    "Alternate primes",
     "square_plus":   "Add consecutive squares",
