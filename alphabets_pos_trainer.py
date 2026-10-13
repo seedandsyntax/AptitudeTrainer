@@ -21,6 +21,8 @@ import calendar_mod
 import percentage_mod
 import average_mod
 import number_system_mod
+import venn_mod
+import syllogism_mod
 
 
 # ------------------------------------------------------------------
@@ -54,7 +56,6 @@ class CLIUserInterface:
         mid = "│" + text.center(width - 2) + "│"
         return f"{top}\n{mid}\n{bot}"
 
-    # ---------- runner ----------
     def _run_questions(self, questions, label, kind):
         if not questions:
             print(clr("No questions.", C.YELLOW))
@@ -113,7 +114,6 @@ class CLIUserInterface:
         else:
             print(clr("  Needs work. Re-read the cheat sheet.", C.RED))
 
-    # ---------- helpers ----------
     def _ask_common(self):
         try:
             n = int(input("Questions? [default 20]: ").strip() or "20")
@@ -205,7 +205,6 @@ class CLIUserInterface:
                 questions, f"{title}:{','.join(types)}", "meta"
             )
 
-    # ---------- Meta: family selector ----------
     def meta_menu(self):
         while True:
             print(clr("\n── Meta Training ──", C.BOLD))
@@ -221,7 +220,9 @@ class CLIUserInterface:
             print("  10) Percentage drills")
             print("  11) Average drills")
             print("  12) Number System drills")
-            print("  13) Unified mixed drills (any family)")
+            print("  13) Venn / Set Theory drills")
+            print("  14) Syllogism drills")
+            print("  15) Unified mixed drills (any family)")
             print("   q) Back to main menu")
             choice = input(clr("Choose: ", C.YELLOW)).strip().lower()
 
@@ -252,11 +253,14 @@ class CLIUserInterface:
             elif choice == "12":
                 self.number_system_menu()
             elif choice == "13":
+                self.venn_menu()
+            elif choice == "14":
+                self.syllogism_menu()
+            elif choice == "15":
                 self.mixed_menu()
             else:
                 print(clr("Invalid choice.", C.RED))
 
-    # ---------- Alphabet submenu ----------
     def alphabet_menu(self):
         while True:
             print(clr("\n── Alphabet Drills ──", C.BOLD))
@@ -278,7 +282,6 @@ class CLIUserInterface:
             questions = core.generate_alphabet_questions(types, n, cooldown=cd)
             self._run_questions(questions, f"alphabet:{label}", "meta")
 
-    # ---------- Family submenus ----------
     def coding_menu(self):
         self._family_menu(
             "Coding-Decoding Drills",
@@ -367,7 +370,22 @@ class CLIUserInterface:
             default_n=15,
         )
 
-    # ---------- Unified mixed submenu ----------
+    def venn_menu(self):
+        self._family_menu(
+            "Venn / Set Theory Drills",
+            venn_mod,
+            core.generate_venn_questions,
+            default_n=15,
+        )
+
+    def syllogism_menu(self):
+        self._family_menu(
+            "Syllogism Drills",
+            syllogism_mod,
+            core.generate_syllogism_questions,
+            default_n=10,
+        )
+
     def mixed_menu(self):
         registry = core.all_types_registry()
         keys = list(registry.keys())
@@ -411,7 +429,6 @@ class CLIUserInterface:
             label = "mixed:" + ",".join(fq_keys)
             self._run_questions(questions, label, "meta")
 
-    # ---------- Custom quiz bank submenu ----------
     def list_quiz_databases(self):
         core.QUIZ_DATA_DIR.mkdir(parents=True, exist_ok=True)
         files = sorted(core.QUIZ_DATA_DIR.glob("*.json"))
@@ -477,7 +494,6 @@ class CLIUserInterface:
             else:
                 print(clr("Invalid choice.", C.RED))
 
-    # ---------- Main ----------
     def main_menu(self):
         print(clr("\n══ Aptitude Trainer ══", C.BOLD))
         print(f"  User: {clr(self.profile.username, C.CYAN)}")

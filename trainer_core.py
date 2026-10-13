@@ -22,6 +22,8 @@ import calendar_mod
 import percentage_mod
 import average_mod
 import number_system_mod
+import venn_mod
+import syllogism_mod
 
 
 ALPHABETS = "abcdefghijklmnopqrstuvwxyz"
@@ -194,6 +196,10 @@ def all_types_registry():
         reg[f"average:{k}"] = ("average", k, f"[V] {average_mod.LABELS[k]}")
     for k in number_system_mod.BUILDERS:
         reg[f"number_system:{k}"] = ("number_system", k, f"[N] {number_system_mod.LABELS[k]}")
+    for k in venn_mod.BUILDERS:
+        reg[f"venn:{k}"] = ("venn", k, f"[E] {venn_mod.LABELS[k]}")
+    for k in syllogism_mod.BUILDERS:
+        reg[f"syllogism:{k}"] = ("syllogism", k, f"[L] {syllogism_mod.LABELS[k]}")
     return reg
 
 
@@ -240,15 +246,11 @@ def generate_number_series_questions(types, count):
 
 
 def generate_clock_questions(types, count):
-    return _generate_parametrized(
-        clock_mod, types, count, strip_difficulty=False
-    )
+    return _generate_parametrized(clock_mod, types, count, strip_difficulty=False)
 
 
 def generate_cube_questions(types, count):
-    return _generate_parametrized(
-        cube_mod, types, count, strip_difficulty=False
-    )
+    return _generate_parametrized(cube_mod, types, count, strip_difficulty=False)
 
 
 def generate_blood_questions(types, count):
@@ -293,6 +295,18 @@ def generate_number_system_questions(types, count):
     )
 
 
+def generate_venn_questions(types, count):
+    return _generate_parametrized(
+        venn_mod, types, count, strip_difficulty=False
+    )
+
+
+def generate_syllogism_questions(types, count):
+    return _generate_parametrized(
+        syllogism_mod, types, count, strip_difficulty=False
+    )
+
+
 # ------------------------------------------------------------------
 # Unified cross-family generator
 # ------------------------------------------------------------------
@@ -312,6 +326,8 @@ def generate_mixed_questions(fq_keys, count):
         "percentage":    percentage_mod,
         "average":       average_mod,
         "number_system": number_system_mod,
+        "venn":          venn_mod,
+        "syllogism":     syllogism_mod,
     }
 
     out = []
