@@ -1,32 +1,20 @@
 """
-CLI Coding-Decoding Trainer.
-Meta section has four families: Alphabet, Coding, Number Series, Clock.
+CLI UI for the coding-decoding trainer.
+
+All generation, pickers, and profile persistence live in trainer_core.
+Entry point is AptitudeTrainer.py.
 """
 
 import json
 import random
 import time
-from pathlib import Path
-from datetime import datetime
-from itertools import combinations
 
+import trainer_core as core
 import code_decode_mod
 import number_series_mod
 import clock_mod
-
-
-ALPHABETS = "abcdefghijklmnopqrstuvwxyz"
-LHS_TABLE = {ch: i + 1 for i, ch in enumerate(ALPHABETS)}
-RHS_TABLE = {ch: 26 - i for i, ch in enumerate(ALPHABETS)}
-
-DATA_DIR = Path("data")
-PROFILES_DIR = DATA_DIR / "profiles"
-QUIZ_DATA_DIR = DATA_DIR / "quiz_data"
-
-
-def ensure_dirs():
-    PROFILES_DIR.mkdir(parents=True, exist_ok=True)
-    QUIZ_DATA_DIR.mkdir(parents=True, exist_ok=True)
+import cube_mod
+import blood_relations_mod
 
 
 # ------------------------------------------------------------------
@@ -47,308 +35,11 @@ def clr(t, c):
 
 
 # ------------------------------------------------------------------
-# Question
-# ------------------------------------------------------------------
-class Question:
-    def __init__(self, prompt, answer, hint="", qtype="", tolerance=None):
-        self.prompt = prompt
-        self.answer = str(answer).strip().lower()
-        self.hint = hint
-        self.qtype = qtype
-        self.tolerance = tolerance
-        self.user_answer = None
-        self.is_correct = False
-        self.time_sec = 0.0
-
-    def check(self, user_input):
-        self.user_answer = str(user_input).strip().lower()
-        if self.tolerance is not None:
-            try:
-                self.is_correct = (
-                    abs(float(self.user_answer) - float(self.answer))
-                    <= self.tolerance
-                )
-            except ValueError:
-                self.is_correct = False
-        else:
-            self.is_correct = self.user_answer == self.answer
-        return self.is_correct
-
-    def to_dict(self):
-        return {
-            "prompt": self.prompt,
-            "qtype": self.qtype,
-            "user_answer": self.user_answer,
-            "correct": self.is_correct,
-            "time_sec": round(self.time_sec, 3),
-        }
-
-
-# ------------------------------------------------------------------
-# Pickers
-# ------------------------------------------------------------------
-class CooldownPicker:
-    def __init__(self, pool, cooldown=3):
-        self.pool = list(pool)
-        self.cooldown = cooldown
-        self.queue = []
-
-    def pick(self):
-        ghost = [x for x in self.pool if x not in self.queue]
-        choice = random.choice(ghost)
-        self.queue.append(choice)
-        if len(self.queue) > self.cooldown:
-            self.queue.pop(0)
-        return choice
-
-
-class Bag:
-    """Draw every item once per cycle, then reshuffle."""
-
-    def __init__(self, items):
-        self.items = list(items)
-        self._deck = []
-
-    def pick(self):
-        if not self._deck:
-            self._deck = self.items[:]
-            random.shuffle(self._deck)
-        return self._deck.pop()
-
-
-# ------------------------------------------------------------------
-# Alphabet generators
-# ------------------------------------------------------------------
-def q_lhs_pos(letter):
-    return Question(
-        prompt=f"LHS position of '{letter.upper()}'?",
-        answer=str(LHS_TABLE[letter]),
-        hint="A=1, B=2, ... Z=26",
-        qtype="lhs_pos",
-    )
-
-
-def q_rhs_pos(letter):
-    return Question(
-        prompt=f"RHS position of '{letter.upper()}'?",
-        answer=str(RHS_TABLE[letter]),
-        hint="RHS = 27 - LHS",
-        qtype="rhs_pos",
-    )
-
-
-def q_pos_to_letter(letter):
-    pos = LHS_TABLE[letter]
-    return Question(
-        prompt=f"Letter at LHS position {pos}?",
-        answer=letter,
-        hint="Count forward from A=1",
-        qtype="pos_letter",
-    )
-
-
-ALPHABET_GENERATORS = {
-    "lhs_pos":    q_lhs_pos,
-    "rhs_pos":    q_rhs_pos,
-    "pos_letter": q_pos_to_letter,
-}
-
-ALPHABET_ATOMS = {
-    "lhs_pos":    "LHS",
-    "rhs_pos":    "RHS",
-    "pos_letter": "Positional",
-}
-
-
-def _all_subsets(atoms):
-    keys = list(atoms)
-    modes = []
-    for r in range(1, len(keys) + 1):
-        for combo in combinations(keys, r):
-            label = " + ".join(atoms[k] for k in combo)
-            modes.append((label, list(combo)))
-    return modes
-
-
-ALPHABET_MODES = _all_subsets(ALPHABET_ATOMS)
-
-
-# ------------------------------------------------------------------
-# Unified registry across all families
-# ------------------------------------------------------------------
-def all_types_registry():
-    """Return {fq_key: (family, key, label)} for every type across families."""
-    reg = {}
-    for k in ALPHABET_GENERATORS:
-        reg[f"alphabet:{k}"] = ("alphabet", k, f"[A] {ALPHABET_ATOMS[k]}")
-    for k in code_decode_mod.GENERATORS:
-        reg[f"coding:{k}"] = ("coding", k, f"[C] {code_decode_mod.LABELS[k]}")
-    for k in number_series_mod.BUILDERS:
-        reg[f"series:{k}"] = ("series", k, f"[S] {number_series_mod.LABELS[k]}")
-    for k in clock_mod.BUILDERS:
-        reg[f"clock:{k}"] = ("clock", k, f"[K] {clock_mod.LABELS[k]}")
-    return reg
-
-
-# ------------------------------------------------------------------
-# Question-set generators (per family)
-# ------------------------------------------------------------------
-def generate_alphabet_questions(types, count, cooldown=5):
-    picker = CooldownPicker(ALPHABETS, cooldown=cooldown)
-    return [
-        ALPHABET_GENERATORS[random.choice(types)](picker.pick())
-        for _ in range(count)
-    ]
-
-
-def generate_coding_questions(types, count, cooldown=5):
-    picker = CooldownPicker(code_decode_mod.WORDS, cooldown=cooldown)
-    out = []
-    for _ in range(count):
-        word = picker.pick()
-        qtype = random.choice(types)
-        out.append(Question(**code_decode_mod.GENERATORS[qtype](word)))
-    return out
-
-
-def generate_number_series_questions(types, count):
-    type_picker = (
-        CooldownPicker(types, cooldown=min(2, len(types) - 1))
-        if len(types) > 1 else None
-    )
-    bags = {t: Bag(number_series_mod.PARAMS[t]) for t in types}
-    out = []
-    for _ in range(count):
-        qtype = types[0] if type_picker is None else type_picker.pick()
-        param = bags[qtype].pick()
-        data = number_series_mod.BUILDERS[qtype](param)
-        data.pop("difficulty", None)
-        out.append(Question(**data))
-    return out
-
-
-def generate_clock_questions(types, count):
-    type_picker = (
-        CooldownPicker(types, cooldown=min(2, len(types) - 1))
-        if len(types) > 1 else None
-    )
-    bags = {t: Bag(clock_mod.PARAMS[t]) for t in types}
-    out = []
-    for _ in range(count):
-        qtype = types[0] if type_picker is None else type_picker.pick()
-        param = bags[qtype].pick()
-        out.append(Question(**clock_mod.BUILDERS[qtype](param)))
-    return out
-
-
-# ------------------------------------------------------------------
-# Unified cross-family generator
-# ------------------------------------------------------------------
-def generate_mixed_questions(fq_keys, count):
-    type_picker = CooldownPicker(fq_keys, cooldown=min(3, len(fq_keys) - 1))
-    letter_picker = CooldownPicker(ALPHABETS, cooldown=5)
-    word_picker = CooldownPicker(code_decode_mod.WORDS, cooldown=5)
-    bags = {}
-
-    out = []
-    for _ in range(count):
-        fq = type_picker.pick()
-        family, key = fq.split(":", 1)
-
-        if family == "alphabet":
-            out.append(ALPHABET_GENERATORS[key](letter_picker.pick()))
-        elif family == "coding":
-            word = word_picker.pick()
-            data = code_decode_mod.GENERATORS[key](word)
-            out.append(Question(**data))
-        elif family == "series":
-            if key not in bags:
-                bags[key] = Bag(number_series_mod.PARAMS[key])
-            param = bags[key].pick()
-            data = number_series_mod.BUILDERS[key](param)
-            data.pop("difficulty", None)
-            out.append(Question(**data))
-        else:  # clock
-            if key not in bags:
-                bags[key] = Bag(clock_mod.PARAMS[key])
-            param = bags[key].pick()
-            out.append(Question(**clock_mod.BUILDERS[key](param)))
-    return out
-
-
-# ------------------------------------------------------------------
-# Profile
-# ------------------------------------------------------------------
-class Profile:
-    def __init__(self, username):
-        self.username = username
-        self.dir = PROFILES_DIR / username
-        self.dir.mkdir(parents=True, exist_ok=True)
-        self.meta_file = self.dir / "meta.json"
-        self.quiz_file = self.dir / "quiz.json"
-        self.meta = self._load(self.meta_file, {"sessions": []})
-        self.quiz = self._load(self.quiz_file, {"sessions": []})
-
-    @staticmethod
-    def _load(path, default):
-        if path.exists():
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except (json.JSONDecodeError, OSError):
-                return default
-        return default
-
-    def save(self):
-        with open(self.meta_file, "w", encoding="utf-8") as f:
-            json.dump(self.meta, f, indent=2)
-        with open(self.quiz_file, "w", encoding="utf-8") as f:
-            json.dump(self.quiz, f, indent=2)
-
-    def record_session(self, kind, label, questions, total_time):
-        n = len(questions) or 1
-        session = {
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
-            "label": label,
-            "question_count": len(questions),
-            "correct": sum(1 for q in questions if q.is_correct),
-            "total_time_sec": round(total_time, 3),
-            "avg_time_sec": round(total_time / n, 3),
-            "per_question": [q.to_dict() for q in questions],
-        }
-        bucket = self.meta if kind == "meta" else self.quiz
-        bucket["sessions"].append(session)
-        self.save()
-        return session
-
-    def summary(self):
-        print(clr(f"\nProfile: {self.username}", C.BOLD))
-        for kind, bucket in (("Meta", self.meta), ("Quiz", self.quiz)):
-            sessions = bucket["sessions"]
-            print(f"  {kind} sessions: {len(sessions)}")
-            if not sessions:
-                continue
-            q_total = sum(s["question_count"] for s in sessions)
-            c_total = sum(s["correct"] for s in sessions)
-            t_total = sum(s["total_time_sec"] for s in sessions)
-            avg_t = t_total / q_total if q_total else 0
-            pct = c_total / q_total * 100 if q_total else 0
-            print(
-                f"    Q={q_total}  correct={c_total} ({pct:.1f}%)  "
-                f"total={t_total:.1f}s  avg={avg_t:.2f}s/q"
-            )
-
-    def last_session(self, kind):
-        bucket = self.meta if kind == "meta" else self.quiz
-        return bucket["sessions"][-1] if bucket["sessions"] else None
-
-
-# ------------------------------------------------------------------
 # UI
 # ------------------------------------------------------------------
 class CLIUserInterface:
     def __init__(self, username="default"):
-        self.profile = Profile(username)
+        self.profile = core.Profile(username)
         self.questions = []
 
     def box(self, text, width=60):
@@ -458,6 +149,56 @@ class CLIUserInterface:
             print(clr("No valid types selected.", C.RED))
         return picked
 
+    def _family_menu(self, title, mod, generator, default_n=20):
+        while True:
+            print(clr(f"\n── {title} ──", C.BOLD))
+            keys = (
+                list(mod.BUILDERS.keys())
+                if hasattr(mod, "BUILDERS")
+                else list(mod.GENERATORS.keys())
+            )
+            labels = mod.LABELS
+
+            for i, k in enumerate(keys, 1):
+                print(f"  {i}) {labels[k]}")
+            n_all = len(keys)
+            print(f"  {n_all + 1}) All types mixed")
+            print(f"  {n_all + 2}) Custom subset")
+            print("  q) Back")
+            choice = input(clr("Choose: ", C.YELLOW)).strip().lower()
+
+            if choice == "q":
+                return
+            if not choice.isdigit():
+                print(clr("Invalid choice.", C.RED))
+                continue
+
+            c = int(choice)
+            if 1 <= c <= n_all:
+                types = [keys[c - 1]]
+            elif c == n_all + 1:
+                types = keys
+            elif c == n_all + 2:
+                types = self._pick_subset(keys, labels)
+                if not types:
+                    continue
+            else:
+                print(clr("Invalid choice.", C.RED))
+                continue
+
+            try:
+                n = int(
+                    input(f"Questions? [default {default_n}]: ").strip()
+                    or str(default_n)
+                )
+            except ValueError:
+                n = default_n
+
+            questions = generator(types, n)
+            self._run_questions(
+                questions, f"{title}:{','.join(types)}", "meta"
+            )
+
     # ---------- Meta: family selector ----------
     def meta_menu(self):
         while True:
@@ -466,7 +207,9 @@ class CLIUserInterface:
             print("  2) Coding-Decoding drills")
             print("  3) Number Series drills")
             print("  4) Clock drills")
-            print("  5) Unified mixed drills (any family)")
+            print("  5) Cube / Cuboid drills")
+            print("  6) Blood Relations drills")
+            print("  7) Unified mixed drills (any family)")
             print("  q) Back to main menu")
             choice = input(clr("Choose: ", C.YELLOW)).strip().lower()
 
@@ -481,15 +224,19 @@ class CLIUserInterface:
             elif choice == "4":
                 self.clock_menu()
             elif choice == "5":
+                self.cube_menu()
+            elif choice == "6":
+                self.blood_menu()
+            elif choice == "7":
                 self.mixed_menu()
             else:
                 print(clr("Invalid choice.", C.RED))
 
-    # ---------- Alphabet submenu (7 modes) ----------
+    # ---------- Alphabet submenu ----------
     def alphabet_menu(self):
         while True:
             print(clr("\n── Alphabet Drills ──", C.BOLD))
-            for i, (label, _) in enumerate(ALPHABET_MODES, 1):
+            for i, (label, _) in enumerate(core.ALPHABET_MODES, 1):
                 print(f"  {i}) {label}")
             print("  q) Back")
             choice = input(clr("Choose: ", C.YELLOW)).strip().lower()
@@ -498,140 +245,59 @@ class CLIUserInterface:
                 return
             try:
                 idx = int(choice) - 1
-                label, types = ALPHABET_MODES[idx]
+                label, types = core.ALPHABET_MODES[idx]
             except (ValueError, IndexError):
                 print(clr("Invalid choice.", C.RED))
                 continue
 
             n, cd = self._ask_common()
-            questions = generate_alphabet_questions(types, n, cooldown=cd)
+            questions = core.generate_alphabet_questions(types, n, cooldown=cd)
             self._run_questions(questions, f"alphabet:{label}", "meta")
 
-    # ---------- Coding submenu ----------
+    # ---------- Family submenus ----------
     def coding_menu(self):
-        while True:
-            print(clr("\n── Coding-Decoding Drills ──", C.BOLD))
-            keys = list(code_decode_mod.GENERATORS.keys())
-            for i, k in enumerate(keys, 1):
-                print(f"  {i}) {code_decode_mod.LABELS[k]}")
-            n_all = len(keys)
-            print(f"  {n_all + 1}) All types mixed")
-            print(f"  {n_all + 2}) Custom subset")
-            print("  q) Back")
-            choice = input(clr("Choose: ", C.YELLOW)).strip().lower()
+        self._family_menu(
+            "Coding-Decoding Drills",
+            code_decode_mod,
+            lambda t, n: core.generate_coding_questions(t, n),
+            default_n=20,
+        )
 
-            if choice == "q":
-                return
-
-            if not choice.isdigit():
-                print(clr("Invalid choice.", C.RED))
-                continue
-
-            c = int(choice)
-            if 1 <= c <= n_all:
-                types = [keys[c - 1]]
-            elif c == n_all + 1:
-                types = keys
-            elif c == n_all + 2:
-                types = self._pick_subset(keys, code_decode_mod.LABELS)
-                if not types:
-                    continue
-            else:
-                print(clr("Invalid choice.", C.RED))
-                continue
-
-            n, cd = self._ask_common()
-            questions = generate_coding_questions(types, n, cooldown=cd)
-            label = "coding:" + ",".join(types)
-            self._run_questions(questions, label, "meta")
-
-    # ---------- Number Series submenu ----------
     def number_series_menu(self):
-        while True:
-            print(clr("\n── Number Series Drills ──", C.BOLD))
-            keys = list(number_series_mod.BUILDERS.keys())
-            for i, k in enumerate(keys, 1):
-                print(f"  {i}) {number_series_mod.LABELS[k]}")
-            n_all = len(keys)
-            print(f"  {n_all + 1}) All types mixed")
-            print(f"  {n_all + 2}) Custom subset")
-            print("  q) Back")
-            choice = input(clr("Choose: ", C.YELLOW)).strip().lower()
+        self._family_menu(
+            "Number Series Drills",
+            number_series_mod,
+            core.generate_number_series_questions,
+            default_n=20,
+        )
 
-            if choice == "q":
-                return
-
-            if not choice.isdigit():
-                print(clr("Invalid choice.", C.RED))
-                continue
-
-            c = int(choice)
-            if 1 <= c <= n_all:
-                types = [keys[c - 1]]
-            elif c == n_all + 1:
-                types = keys
-            elif c == n_all + 2:
-                types = self._pick_subset(keys, number_series_mod.LABELS)
-                if not types:
-                    continue
-            else:
-                print(clr("Invalid choice.", C.RED))
-                continue
-
-            try:
-                n = int(input("Questions? [default 20]: ").strip() or "20")
-            except ValueError:
-                n = 20
-
-            questions = generate_number_series_questions(types, n)
-            label = "series:" + ",".join(types)
-            self._run_questions(questions, label, "meta")
-
-    # ---------- Clock submenu ----------
     def clock_menu(self):
-        while True:
-            print(clr("\n── Clock Drills ──", C.BOLD))
-            keys = list(clock_mod.BUILDERS.keys())
-            for i, k in enumerate(keys, 1):
-                print(f"  {i}) {clock_mod.LABELS[k]}")
-            n_all = len(keys)
-            print(f"  {n_all + 1}) All types mixed")
-            print(f"  {n_all + 2}) Custom subset")
-            print("  q) Back")
-            choice = input(clr("Choose: ", C.YELLOW)).strip().lower()
+        self._family_menu(
+            "Clock Drills",
+            clock_mod,
+            core.generate_clock_questions,
+            default_n=10,
+        )
 
-            if choice == "q":
-                return
+    def cube_menu(self):
+        self._family_menu(
+            "Cube / Cuboid Drills",
+            cube_mod,
+            core.generate_cube_questions,
+            default_n=20,
+        )
 
-            if not choice.isdigit():
-                print(clr("Invalid choice.", C.RED))
-                continue
-
-            c = int(choice)
-            if 1 <= c <= n_all:
-                types = [keys[c - 1]]
-            elif c == n_all + 1:
-                types = keys
-            elif c == n_all + 2:
-                types = self._pick_subset(keys, clock_mod.LABELS)
-                if not types:
-                    continue
-            else:
-                print(clr("Invalid choice.", C.RED))
-                continue
-
-            try:
-                n = int(input("Questions? [default 10]: ").strip() or "10")
-            except ValueError:
-                n = 10
-
-            questions = generate_clock_questions(types, n)
-            label = "clock:" + ",".join(types)
-            self._run_questions(questions, label, "meta")
+    def blood_menu(self):
+        self._family_menu(
+            "Blood Relations Drills",
+            blood_relations_mod,
+            core.generate_blood_questions,
+            default_n=10,
+        )
 
     # ---------- Unified mixed submenu ----------
     def mixed_menu(self):
-        registry = all_types_registry()
+        registry = core.all_types_registry()
         keys = list(registry.keys())
 
         while True:
@@ -669,14 +335,14 @@ class CLIUserInterface:
             except ValueError:
                 n = 20
 
-            questions = generate_mixed_questions(fq_keys, n)
+            questions = core.generate_mixed_questions(fq_keys, n)
             label = "mixed:" + ",".join(fq_keys)
             self._run_questions(questions, label, "meta")
 
     # ---------- Custom quiz bank submenu ----------
     def list_quiz_databases(self):
-        QUIZ_DATA_DIR.mkdir(parents=True, exist_ok=True)
-        files = sorted(QUIZ_DATA_DIR.glob("*.json"))
+        core.QUIZ_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        files = sorted(core.QUIZ_DATA_DIR.glob("*.json"))
         if not files:
             print(clr("No quiz databases in data/quiz_data/.", C.YELLOW))
             return []
@@ -696,7 +362,7 @@ class CLIUserInterface:
         qs = []
         for item in data.get("questions", []):
             qs.append(
-                Question(
+                core.Question(
                     prompt=item["prompt"],
                     answer=str(item["answer"]),
                     hint=item.get("hint", ""),
@@ -785,7 +451,8 @@ class CLIUserInterface:
             elif choice == "2":
                 self.quiz_menu()
             elif choice == "3":
-                self.profile.summary()
+                for line in self.profile.summary_lines():
+                    print(line)
             elif choice == "4":
                 self.last_session_report()
             elif choice in ("q", "quit", "exit"):
@@ -793,16 +460,3 @@ class CLIUserInterface:
                 return
             else:
                 print(clr("Invalid choice.", C.RED))
-
-
-def main():
-    ensure_dirs()
-    try:
-        username = input("Username [default]: ").strip() or "default"
-        CLIUserInterface(username).main_loop()
-    except (KeyboardInterrupt, EOFError):
-        print(clr("\n\nInterrupted. Bye!", C.CYAN))
-
-
-if __name__ == "__main__":
-    main()
