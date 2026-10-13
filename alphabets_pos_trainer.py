@@ -1,5 +1,5 @@
 """
-CLI UI for the coding-decoding trainer.
+CLI UI for the aptitude trainer.
 
 All generation, pickers, and profile persistence live in trainer_core.
 Entry point is AptitudeTrainer.py.
@@ -15,6 +15,12 @@ import number_series_mod
 import clock_mod
 import cube_mod
 import blood_relations_mod
+import direction_mod
+import hcf_lcm_mod
+import calendar_mod
+import percentage_mod
+import average_mod
+import number_system_mod
 
 
 # ------------------------------------------------------------------
@@ -203,14 +209,20 @@ class CLIUserInterface:
     def meta_menu(self):
         while True:
             print(clr("\n── Meta Training ──", C.BOLD))
-            print("  1) Alphabet drills")
-            print("  2) Coding-Decoding drills")
-            print("  3) Number Series drills")
-            print("  4) Clock drills")
-            print("  5) Cube / Cuboid drills")
-            print("  6) Blood Relations drills")
-            print("  7) Unified mixed drills (any family)")
-            print("  q) Back to main menu")
+            print("   1) Alphabet drills")
+            print("   2) Coding-Decoding drills")
+            print("   3) Number Series drills")
+            print("   4) Clock drills")
+            print("   5) Cube / Cuboid drills")
+            print("   6) Blood Relations drills")
+            print("   7) Direction Sense drills")
+            print("   8) HCF / LCM drills")
+            print("   9) Calendar drills")
+            print("  10) Percentage drills")
+            print("  11) Average drills")
+            print("  12) Number System drills")
+            print("  13) Unified mixed drills (any family)")
+            print("   q) Back to main menu")
             choice = input(clr("Choose: ", C.YELLOW)).strip().lower()
 
             if choice == "q":
@@ -228,6 +240,18 @@ class CLIUserInterface:
             elif choice == "6":
                 self.blood_menu()
             elif choice == "7":
+                self.direction_menu()
+            elif choice == "8":
+                self.hcf_lcm_menu()
+            elif choice == "9":
+                self.calendar_menu()
+            elif choice == "10":
+                self.percentage_menu()
+            elif choice == "11":
+                self.average_menu()
+            elif choice == "12":
+                self.number_system_menu()
+            elif choice == "13":
                 self.mixed_menu()
             else:
                 print(clr("Invalid choice.", C.RED))
@@ -293,6 +317,54 @@ class CLIUserInterface:
             blood_relations_mod,
             core.generate_blood_questions,
             default_n=10,
+        )
+
+    def direction_menu(self):
+        self._family_menu(
+            "Direction Sense Drills",
+            direction_mod,
+            core.generate_direction_questions,
+            default_n=10,
+        )
+
+    def hcf_lcm_menu(self):
+        self._family_menu(
+            "HCF / LCM Drills",
+            hcf_lcm_mod,
+            core.generate_hcf_lcm_questions,
+            default_n=15,
+        )
+
+    def calendar_menu(self):
+        self._family_menu(
+            "Calendar Drills",
+            calendar_mod,
+            core.generate_calendar_questions,
+            default_n=15,
+        )
+
+    def percentage_menu(self):
+        self._family_menu(
+            "Percentage Drills",
+            percentage_mod,
+            core.generate_percentage_questions,
+            default_n=15,
+        )
+
+    def average_menu(self):
+        self._family_menu(
+            "Average Drills",
+            average_mod,
+            core.generate_average_questions,
+            default_n=15,
+        )
+
+    def number_system_menu(self):
+        self._family_menu(
+            "Number System Drills",
+            number_system_mod,
+            core.generate_number_system_questions,
+            default_n=15,
         )
 
     # ---------- Unified mixed submenu ----------
@@ -407,7 +479,7 @@ class CLIUserInterface:
 
     # ---------- Main ----------
     def main_menu(self):
-        print(clr("\n══ Coding-Decoding Trainer ══", C.BOLD))
+        print(clr("\n══ Aptitude Trainer ══", C.BOLD))
         print(f"  User: {clr(self.profile.username, C.CYAN)}")
         print("  1) Meta training")
         print("  2) Custom quiz bank")
@@ -443,7 +515,7 @@ class CLIUserInterface:
             )
 
     def main_loop(self):
-        print(self.box("CODING-DECODING CLI TRAINER"))
+        print(self.box("APTITUDE CLI TRAINER"))
         while True:
             choice = self.main_menu()
             if choice == "1":

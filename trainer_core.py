@@ -1,7 +1,7 @@
 """
 Training core: question generation, fairness pickers, registry, profiles.
 
-UI and entry point live in alphabets_pos_trainer.py.
+UI and entry point live in alphabets_pos_trainer.py and AptitudeTrainer.py.
 This module knows nothing about menus, colors, or terminal output.
 """
 
@@ -16,6 +16,12 @@ import number_series_mod
 import clock_mod
 import cube_mod
 import blood_relations_mod
+import direction_mod
+import hcf_lcm_mod
+import calendar_mod
+import percentage_mod
+import average_mod
+import number_system_mod
 
 
 ALPHABETS = "abcdefghijklmnopqrstuvwxyz"
@@ -176,6 +182,18 @@ def all_types_registry():
         reg[f"cube:{k}"] = ("cube", k, f"[U] {cube_mod.LABELS[k]}")
     for k in blood_relations_mod.BUILDERS:
         reg[f"blood:{k}"] = ("blood", k, f"[B] {blood_relations_mod.LABELS[k]}")
+    for k in direction_mod.BUILDERS:
+        reg[f"direction:{k}"] = ("direction", k, f"[D] {direction_mod.LABELS[k]}")
+    for k in hcf_lcm_mod.BUILDERS:
+        reg[f"hcf_lcm:{k}"] = ("hcf_lcm", k, f"[H] {hcf_lcm_mod.LABELS[k]}")
+    for k in calendar_mod.BUILDERS:
+        reg[f"calendar:{k}"] = ("calendar", k, f"[Y] {calendar_mod.LABELS[k]}")
+    for k in percentage_mod.BUILDERS:
+        reg[f"percentage:{k}"] = ("percentage", k, f"[%] {percentage_mod.LABELS[k]}")
+    for k in average_mod.BUILDERS:
+        reg[f"average:{k}"] = ("average", k, f"[V] {average_mod.LABELS[k]}")
+    for k in number_system_mod.BUILDERS:
+        reg[f"number_system:{k}"] = ("number_system", k, f"[N] {number_system_mod.LABELS[k]}")
     return reg
 
 
@@ -239,6 +257,42 @@ def generate_blood_questions(types, count):
     )
 
 
+def generate_direction_questions(types, count):
+    return _generate_parametrized(
+        direction_mod, types, count, strip_difficulty=False
+    )
+
+
+def generate_hcf_lcm_questions(types, count):
+    return _generate_parametrized(
+        hcf_lcm_mod, types, count, strip_difficulty=False
+    )
+
+
+def generate_calendar_questions(types, count):
+    return _generate_parametrized(
+        calendar_mod, types, count, strip_difficulty=False
+    )
+
+
+def generate_percentage_questions(types, count):
+    return _generate_parametrized(
+        percentage_mod, types, count, strip_difficulty=False
+    )
+
+
+def generate_average_questions(types, count):
+    return _generate_parametrized(
+        average_mod, types, count, strip_difficulty=False
+    )
+
+
+def generate_number_system_questions(types, count):
+    return _generate_parametrized(
+        number_system_mod, types, count, strip_difficulty=False
+    )
+
+
 # ------------------------------------------------------------------
 # Unified cross-family generator
 # ------------------------------------------------------------------
@@ -248,10 +302,16 @@ def generate_mixed_questions(fq_keys, count):
     word_picker = CooldownPicker(code_decode_mod.WORDS, cooldown=5)
     bags = {}
     mod_for = {
-        "series": number_series_mod,
-        "clock":  clock_mod,
-        "cube":   cube_mod,
-        "blood":  blood_relations_mod,
+        "series":        number_series_mod,
+        "clock":         clock_mod,
+        "cube":          cube_mod,
+        "blood":         blood_relations_mod,
+        "direction":     direction_mod,
+        "hcf_lcm":       hcf_lcm_mod,
+        "calendar":      calendar_mod,
+        "percentage":    percentage_mod,
+        "average":       average_mod,
+        "number_system": number_system_mod,
     }
 
     out = []
