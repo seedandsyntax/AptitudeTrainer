@@ -1,6 +1,6 @@
 """
 CLI Coding-Decoding Trainer
-- Meta drills: alphabet position training (6 modes)
+- Meta drills: alphabet position training (7 modes)
 - Quiz: JSON-loaded question banks
 - Time-tracked, profile-persisted.
 """
@@ -10,8 +10,6 @@ import random
 import time
 from pathlib import Path
 from datetime import datetime
-from typing import Optional
-from collections import deque
 
 
 ALPHABETS = "abcdefghijklmnopqrstuvwxyz"
@@ -27,7 +25,7 @@ PROFILES_DIR = DATA_DIR / "profiles"
 QUIZ_DATA_DIR = DATA_DIR / "quiz_data"
 
 
-def ensure_dirs() -> None:
+def ensure_dirs():
     PROFILES_DIR.mkdir(parents=True, exist_ok=True)
     QUIZ_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -45,7 +43,7 @@ class C:
     GREY = "\033[90m"
 
 
-def clr(t: str, c: str) -> str:
+def clr(t, c):
     return f"{c}{t}{C.RESET}"
 
 
@@ -53,22 +51,21 @@ def clr(t: str, c: str) -> str:
 # Question
 # ------------------------------------------------------------------
 class Question:
-    def __init__(self, prompt: str, answer: str, hint: str = "", qtype: str = ""):
+    def __init__(self, prompt, answer, hint="", qtype=""):
         self.prompt = prompt
         self.answer = str(answer).strip().lower()
         self.hint = hint
         self.qtype = qtype
-        # runtime
-        self.user_answer: Optional[str] = None
-        self.is_correct: bool = False
-        self.time_sec: float = 0.0
+        self.user_answer = None
+        self.is_correct = False
+        self.time_sec = 0.0
 
-    def check(self, user_input: str) -> bool:
+    def check(self, user_input):
         self.user_answer = str(user_input).strip().lower()
         self.is_correct = self.user_answer == self.answer
         return self.is_correct
 
-    def to_dict(self) -> dict:
+    def to_dict(self):
         return {
             "prompt": self.prompt,
             "qtype": self.qtype,
@@ -79,9 +76,27 @@ class Question:
 
 
 # ------------------------------------------------------------------
-# Meta question generators
+# Cooldown picker
 # ------------------------------------------------------------------
-def q_lhs_pos(letter: str) -> Question:
+class CooldownPicker:
+    def __init__(self, pool, cooldown=3):
+        self.pool = list(pool)
+        self.cooldown = cooldown
+        self.queue = []
+
+    def pick(self):
+        ghost = [x for x in self.pool if x not in self.queue]
+        choice = random.choice(ghost)
+        self.queue.append(choice)
+        if len(self.queue) > self.cooldown:
+            self.queue.pop(0)
+        return choice
+
+
+# ------------------------------------------------------------------
+# Meta generators
+# ------------------------------------------------------------------
+def q_lhs_pos(letter):
     return Question(
         prompt=f"LHS position of '{letter.upper()}'?",
         answer=str(LHS_TABLE[letter]),
@@ -90,7 +105,7 @@ def q_lhs_pos(letter: str) -> Question:
     )
 
 
-def q_rhs_pos(letter: str) -> Question:
+def q_rhs_pos(letter):
     return Question(
         prompt=f"RHS position of '{letter.upper()}'?",
         answer=str(RHS_TABLE[letter]),
@@ -99,7 +114,7 @@ def q_rhs_pos(letter: str) -> Question:
     )
 
 
-def q_pos_to_letter(letter: str) -> Question:
+def q_pos_to_letter(letter):
     pos = LHS_TABLE[letter]
     return Question(
         prompt=f"Letter at LHS position {pos}?",
@@ -116,61 +131,30 @@ GENERATORS = {
 }
 
 
-# 3 pure + 3 pairings = 6 modes (skip the all-three superset)
 META_MODES = {
-    "1": ("LHS only",         ["lhs_pos"]),
-    "2": ("RHS only",         ["rhs_pos"]),
-    "3": ("Positional only",  ["pos_letter"]),
-    "4": ("LHS + RHS",        ["lhs_pos", "rhs_pos"]),
-    "5": ("LHS + Positional", ["lhs_pos", "pos_letter"]),
-    "6": ("RHS + Positional", ["rhs_pos", "pos_letter"]),
-    "7": ("LHS + RHS + Positional", ["lhs_pos", "rhs_pos", "pos_letter"]),
+    "1": ("LHS only",                 ["lhs_pos"]),
+    "2": ("RHS only",                 ["rhs_pos"]),
+    "3": ("Positional only",          ["pos_letter"]),
+    "4": ("LHS + RHS",                ["lhs_pos", "rhs_pos"]),
+    "5": ("LHS + Positional",         ["lhs_pos", "pos_letter"]),
+    "6": ("RHS + Positional",         ["rhs_pos", "pos_letter"]),
+    "7": ("LHS + RHS + Positional",   ["lhs_pos", "rhs_pos", "pos_letter"]),
 }
 
 
-class CooldownPicker:
-    """
-    FIFO cooldown picker.
-
-    The last `cooldown` picks are held in a queue and excluded from
-    sampling. Each pick is drawn uniformly from the remaining pool
-    (the "ghost list"). Once a pick slides out of the queue, its letter
-    becomes eligible again.
-
-    Guarantee: pick[i] != pick[j] for any i < j with j - i <= cooldown.
-    """
-
-    def __init__(self, pool, cooldown: int = 3):
-        self.pool = list(pool)
-        self.cooldown = cooldown
-        self.queue: list = []
-
-    def pick(self):
-        ghost = [x for x in self.pool if x not in self.queue]
-        if not ghost:              # only if pool <= cooldown
-            ghost = self.pool[:]
-        choice = random.choice(ghost)
-        self.queue.append(choice)
-        if len(self.queue) > self.cooldown:
-            self.queue.pop(0)
-        return choice
-
-    def state(self) -> dict:
-        return {"queue": list(self.queue), "cooldown": self.cooldown}
-
-
-def generate_meta_questions(types: list[str], count: int) -> list[Question]:
-    picker = CooldownPicker(ALPHABETS, cooldown=3)
+def generate_meta_questions(types, count, cooldown=3):
+    picker = CooldownPicker(ALPHABETS, cooldown=cooldown)
     return [
         GENERATORS[random.choice(types)](picker.pick())
         for _ in range(count)
     ]
 
+
 # ------------------------------------------------------------------
-# Profile: persistence for time + scores
+# Profile
 # ------------------------------------------------------------------
 class Profile:
-    def __init__(self, username: str):
+    def __init__(self, username):
         self.username = username
         self.dir = PROFILES_DIR / username
         self.dir.mkdir(parents=True, exist_ok=True)
@@ -180,7 +164,7 @@ class Profile:
         self.quiz = self._load(self.quiz_file, {"sessions": []})
 
     @staticmethod
-    def _load(path: Path, default: dict) -> dict:
+    def _load(path, default):
         if path.exists():
             try:
                 with open(path, "r", encoding="utf-8") as f:
@@ -189,19 +173,13 @@ class Profile:
                 return default
         return default
 
-    def save(self) -> None:
+    def save(self):
         with open(self.meta_file, "w", encoding="utf-8") as f:
             json.dump(self.meta, f, indent=2)
         with open(self.quiz_file, "w", encoding="utf-8") as f:
             json.dump(self.quiz, f, indent=2)
 
-    def record_session(
-        self,
-        kind: str,  # "meta" | "quiz"
-        label: str,
-        questions: list[Question],
-        total_time: float,
-    ) -> dict:
+    def record_session(self, kind, label, questions, total_time):
         n = len(questions) or 1
         session = {
             "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -217,7 +195,7 @@ class Profile:
         self.save()
         return session
 
-    def summary(self) -> None:
+    def summary(self):
         print(clr(f"\nProfile: {self.username}", C.BOLD))
 
         for kind, bucket in (("Meta", self.meta), ("Quiz", self.quiz)):
@@ -235,7 +213,7 @@ class Profile:
                 f"total={t_total:.1f}s  avg={avg_t:.2f}s/q"
             )
 
-    def last_session(self, kind: str) -> Optional[dict]:
+    def last_session(self, kind):
         bucket = self.meta if kind == "meta" else self.quiz
         return bucket["sessions"][-1] if bucket["sessions"] else None
 
@@ -244,25 +222,24 @@ class Profile:
 # UI
 # ------------------------------------------------------------------
 class CLIUserInterface:
-    def __init__(self, username: str = "default"):
+    def __init__(self, username="default"):
         self.profile = Profile(username)
-        self.questions: list[Question] = []  # for the quiz section
+        self.questions = []
 
-    # ---------- decorations ----------
-    def box(self, text: str, width: int = 60) -> str:
+    def box(self, text, width=60):
         top = "┌" + "─" * (width - 2) + "┐"
         bot = "└" + "─" * (width - 2) + "┘"
         mid = "│" + text.center(width - 2) + "│"
         return f"{top}\n{mid}\n{bot}"
 
-    # ---------- timed quiz runner (shared by meta & quiz) ----------
-    def _run_questions(
-        self, questions: list[Question], label: str, kind: str
-    ) -> None:
+    def _run_questions(self, questions, label, kind):
         if not questions:
             print(clr("No questions.", C.YELLOW))
             return
-        random.shuffle(questions)
+
+        if kind == "quiz":
+            random.shuffle(questions)
+
         n = len(questions)
         print(
             f"\n{clr('Session:', C.CYAN)} {label}  "
@@ -313,8 +290,7 @@ class CLIUserInterface:
         else:
             print(clr("  Needs work. Re-read the cheat sheet.", C.RED))
 
-    # ---------- Meta menu ----------
-    def meta_menu(self) -> None:
+    def meta_menu(self):
         while True:
             print(clr("\n── Meta Alphabet Drill ──", C.BOLD))
             for key, (label, _) in META_MODES.items():
@@ -333,11 +309,15 @@ class CLIUserInterface:
                 n = int(input("Questions? [default 20]: ").strip() or "20")
             except ValueError:
                 n = 20
-            questions = generate_meta_questions(types, n)
+            try:
+                cd = int(input("Cooldown? [default 5]: ").strip() or "5")
+            except ValueError:
+                cd = 5
+
+            questions = generate_meta_questions(types, n, cooldown=cd)
             self._run_questions(questions, f"meta:{label}", "meta")
 
-    # ---------- Quiz menu ----------
-    def list_quiz_databases(self) -> list[Path]:
+    def list_quiz_databases(self):
         QUIZ_DATA_DIR.mkdir(parents=True, exist_ok=True)
         files = sorted(QUIZ_DATA_DIR.glob("*.json"))
         if not files:
@@ -348,7 +328,7 @@ class CLIUserInterface:
             print(f"  {i}) {f.name}")
         return files
 
-    def load_quiz_from_json(self, path: Path) -> None:
+    def load_quiz_from_json(self, path):
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -356,7 +336,7 @@ class CLIUserInterface:
             print(clr(f"Failed to load: {e}", C.RED))
             return
 
-        qs: list[Question] = []
+        qs = []
         for item in data.get("questions", []):
             qs.append(
                 Question(
@@ -369,7 +349,7 @@ class CLIUserInterface:
         self.questions = qs
         print(clr(f"Loaded {len(qs)} questions from {path.name}", C.GREEN))
 
-    def quiz_menu(self) -> None:
+    def quiz_menu(self):
         while True:
             print(clr("\n── Quiz ──", C.BOLD))
             print(f"  Loaded: {len(self.questions)} questions")
@@ -402,8 +382,7 @@ class CLIUserInterface:
             else:
                 print(clr("Invalid choice.", C.RED))
 
-    # ---------- Main ----------
-    def main_menu(self) -> str:
+    def main_menu(self):
         print(clr("\n══ Coding-Decoding Trainer ══", C.BOLD))
         print(f"  User: {clr(self.profile.username, C.CYAN)}")
         print("  1) Meta — alphabet drill")
@@ -413,7 +392,7 @@ class CLIUserInterface:
         print("  q) Quit")
         return input(clr("\nChoose: ", C.YELLOW)).strip().lower()
 
-    def last_session_report(self) -> None:
+    def last_session_report(self):
         print(clr("\nWhich profile?", C.BOLD))
         print("  1) Meta   2) Quiz")
         k = input("  > ").strip()
@@ -439,7 +418,7 @@ class CLIUserInterface:
                 f"{pq['time_sec']:>6.2f}s  [{pq['qtype']}]"
             )
 
-    def main_loop(self) -> None:
+    def main_loop(self):
         print(self.box("CODING-DECODING CLI TRAINER"))
         while True:
             choice = self.main_menu()
@@ -461,7 +440,7 @@ class CLIUserInterface:
 # ------------------------------------------------------------------
 # Entry
 # ------------------------------------------------------------------
-def main() -> None:
+def main():
     ensure_dirs()
     username = input("Username [default]: ").strip() or "default"
     try:
