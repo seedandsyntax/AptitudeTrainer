@@ -1,8 +1,6 @@
 """
-CLI Coding-Decoding Trainer
-- Meta drills: alphabet position training (7 modes)
-- Quiz: JSON-loaded question banks
-- Time-tracked, profile-persisted.
+CLI Coding-Decoding Trainer.
+Meta section has three families: Alphabet, Coding, Number Series.
 """
 
 import json
@@ -10,16 +8,16 @@ import random
 import time
 from pathlib import Path
 from datetime import datetime
+from itertools import combinations
+
+import code_decode_mod
+import number_series_mod
 
 
 ALPHABETS = "abcdefghijklmnopqrstuvwxyz"
 LHS_TABLE = {ch: i + 1 for i, ch in enumerate(ALPHABETS)}
 RHS_TABLE = {ch: 26 - i for i, ch in enumerate(ALPHABETS)}
 
-
-# ------------------------------------------------------------------
-# Paths
-# ------------------------------------------------------------------
 DATA_DIR = Path("data")
 PROFILES_DIR = DATA_DIR / "profiles"
 QUIZ_DATA_DIR = DATA_DIR / "quiz_data"
@@ -76,7 +74,7 @@ class Question:
 
 
 # ------------------------------------------------------------------
-# Cooldown picker
+# Pickers
 # ------------------------------------------------------------------
 class CooldownPicker:
     def __init__(self, pool, cooldown=3):
@@ -93,8 +91,22 @@ class CooldownPicker:
         return choice
 
 
+class Bag:
+    """Draw every item once per cycle, then reshuffle."""
+
+    def __init__(self, items):
+        self.items = list(items)
+        self._deck = []
+
+    def pick(self):
+        if not self._deck:
+            self._deck = self.items[:]
+            random.shuffle(self._deck)
+        return self._deck.pop()
+
+
 # ------------------------------------------------------------------
-# Meta generators
+# Alphabet generators
 # ------------------------------------------------------------------
 def q_lhs_pos(letter):
     return Question(
@@ -124,30 +136,67 @@ def q_pos_to_letter(letter):
     )
 
 
-GENERATORS = {
-    "lhs_pos": q_lhs_pos,
-    "rhs_pos": q_rhs_pos,
+ALPHABET_GENERATORS = {
+    "lhs_pos":    q_lhs_pos,
+    "rhs_pos":    q_rhs_pos,
     "pos_letter": q_pos_to_letter,
 }
 
-
-META_MODES = {
-    "1": ("LHS only",                 ["lhs_pos"]),
-    "2": ("RHS only",                 ["rhs_pos"]),
-    "3": ("Positional only",          ["pos_letter"]),
-    "4": ("LHS + RHS",                ["lhs_pos", "rhs_pos"]),
-    "5": ("LHS + Positional",         ["lhs_pos", "pos_letter"]),
-    "6": ("RHS + Positional",         ["rhs_pos", "pos_letter"]),
-    "7": ("LHS + RHS + Positional",   ["lhs_pos", "rhs_pos", "pos_letter"]),
+ALPHABET_ATOMS = {
+    "lhs_pos":    "LHS",
+    "rhs_pos":    "RHS",
+    "pos_letter": "Positional",
 }
 
 
-def generate_meta_questions(types, count, cooldown=3):
+def _all_subsets(atoms):
+    keys = list(atoms)
+    modes = []
+    for r in range(1, len(keys) + 1):
+        for combo in combinations(keys, r):
+            label = " + ".join(atoms[k] for k in combo)
+            modes.append((label, list(combo)))
+    return modes
+
+
+ALPHABET_MODES = _all_subsets(ALPHABET_ATOMS)
+
+
+# ------------------------------------------------------------------
+# Question-set generators
+# ------------------------------------------------------------------
+def generate_alphabet_questions(types, count, cooldown=5):
     picker = CooldownPicker(ALPHABETS, cooldown=cooldown)
     return [
-        GENERATORS[random.choice(types)](picker.pick())
+        ALPHABET_GENERATORS[random.choice(types)](picker.pick())
         for _ in range(count)
     ]
+
+
+def generate_coding_questions(types, count, cooldown=5):
+    picker = CooldownPicker(code_decode_mod.WORDS, cooldown=cooldown)
+    out = []
+    for _ in range(count):
+        word = picker.pick()
+        qtype = random.choice(types)
+        out.append(Question(**code_decode_mod.GENERATORS[qtype](word)))
+    return out
+
+
+def generate_number_series_questions(types, count):
+    type_picker = (
+        CooldownPicker(types, cooldown=min(2, len(types) - 1))
+        if len(types) > 1 else None
+    )
+    bags = {t: Bag(number_series_mod.PARAMS[t]) for t in types}
+    out = []
+    for _ in range(count):
+        qtype = types[0] if type_picker is None else type_picker.pick()
+        param = bags[qtype].pick()
+        data = number_series_mod.BUILDERS[qtype](param)
+        data.pop("difficulty", None)
+        out.append(Question(**data))
+    return out
 
 
 # ------------------------------------------------------------------
@@ -197,7 +246,6 @@ class Profile:
 
     def summary(self):
         print(clr(f"\nProfile: {self.username}", C.BOLD))
-
         for kind, bucket in (("Meta", self.meta), ("Quiz", self.quiz)):
             sessions = bucket["sessions"]
             print(f"  {kind} sessions: {len(sessions)}")
@@ -232,6 +280,7 @@ class CLIUserInterface:
         mid = "│" + text.center(width - 2) + "│"
         return f"{top}\n{mid}\n{bot}"
 
+    # ---------- runner ----------
     def _run_questions(self, questions, label, kind):
         if not questions:
             print(clr("No questions.", C.YELLOW))
@@ -282,7 +331,7 @@ class CLIUserInterface:
         print(f"  Total time: {total_time:.2f}s   Avg/question: {avg:.2f}s")
 
         if pct == 100:
-            print(clr("  Perfect! 🔥", C.GREEN))
+            print(clr("  Perfect!", C.GREEN))
         elif pct >= 80:
             print(clr("  Strong. Keep going.", C.GREEN))
         elif pct >= 50:
@@ -290,33 +339,157 @@ class CLIUserInterface:
         else:
             print(clr("  Needs work. Re-read the cheat sheet.", C.RED))
 
+    # ---------- helpers ----------
+    def _ask_common(self):
+        try:
+            n = int(input("Questions? [default 20]: ").strip() or "20")
+        except ValueError:
+            n = 20
+        try:
+            cd = int(input("Cooldown? [default 5]: ").strip() or "5")
+        except ValueError:
+            cd = 5
+        return n, cd
+
+    def _pick_subset(self, keys, labels):
+        print("Enter type numbers, comma-separated (e.g. 1,3,5):")
+        for i, k in enumerate(keys, 1):
+            print(f"  {i}) {labels[k]}")
+        raw = input("  > ").strip()
+        try:
+            idxs = [int(x.strip()) - 1 for x in raw.split(",") if x.strip()]
+        except ValueError:
+            print(clr("Invalid input.", C.RED))
+            return []
+        picked = [keys[i] for i in idxs if 0 <= i < len(keys)]
+        if not picked:
+            print(clr("No valid types selected.", C.RED))
+        return picked
+
+    # ---------- Meta: family selector ----------
     def meta_menu(self):
         while True:
-            print(clr("\n── Meta Alphabet Drill ──", C.BOLD))
-            for key, (label, _) in META_MODES.items():
-                print(f"  {key}) {label}")
+            print(clr("\n── Meta Training ──", C.BOLD))
+            print("  1) Alphabet drills")
+            print("  2) Coding-Decoding drills")
+            print("  3) Number Series drills")
             print("  q) Back to main menu")
             choice = input(clr("Choose: ", C.YELLOW)).strip().lower()
 
             if choice == "q":
                 return
-            if choice not in META_MODES:
+            if choice == "1":
+                self.alphabet_menu()
+            elif choice == "2":
+                self.coding_menu()
+            elif choice == "3":
+                self.number_series_menu()
+            else:
+                print(clr("Invalid choice.", C.RED))
+
+    # ---------- Alphabet submenu (7 modes) ----------
+    def alphabet_menu(self):
+        while True:
+            print(clr("\n── Alphabet Drills ──", C.BOLD))
+            for i, (label, _) in enumerate(ALPHABET_MODES, 1):
+                print(f"  {i}) {label}")
+            print("  q) Back")
+            choice = input(clr("Choose: ", C.YELLOW)).strip().lower()
+
+            if choice == "q":
+                return
+            try:
+                idx = int(choice) - 1
+                label, types = ALPHABET_MODES[idx]
+            except (ValueError, IndexError):
                 print(clr("Invalid choice.", C.RED))
                 continue
 
-            label, types = META_MODES[choice]
+            n, cd = self._ask_common()
+            questions = generate_alphabet_questions(types, n, cooldown=cd)
+            self._run_questions(questions, f"alphabet:{label}", "meta")
+
+    # ---------- Coding submenu ----------
+    def coding_menu(self):
+        while True:
+            print(clr("\n── Coding-Decoding Drills ──", C.BOLD))
+            keys = list(code_decode_mod.GENERATORS.keys())
+            for i, k in enumerate(keys, 1):
+                print(f"  {i}) {code_decode_mod.LABELS[k]}")
+            n_all = len(keys)
+            print(f"  {n_all + 1}) All types mixed")
+            print(f"  {n_all + 2}) Custom subset")
+            print("  q) Back")
+            choice = input(clr("Choose: ", C.YELLOW)).strip().lower()
+
+            if choice == "q":
+                return
+
+            if not choice.isdigit():
+                print(clr("Invalid choice.", C.RED))
+                continue
+
+            c = int(choice)
+            if 1 <= c <= n_all:
+                types = [keys[c - 1]]
+            elif c == n_all + 1:
+                types = keys
+            elif c == n_all + 2:
+                types = self._pick_subset(keys, code_decode_mod.LABELS)
+                if not types:
+                    continue
+            else:
+                print(clr("Invalid choice.", C.RED))
+                continue
+
+            n, cd = self._ask_common()
+            questions = generate_coding_questions(types, n, cooldown=cd)
+            label = "coding:" + ",".join(types)
+            self._run_questions(questions, label, "meta")
+
+    # ---------- Number Series submenu ----------
+    def number_series_menu(self):
+        while True:
+            print(clr("\n── Number Series Drills ──", C.BOLD))
+            keys = list(number_series_mod.BUILDERS.keys())
+            for i, k in enumerate(keys, 1):
+                print(f"  {i}) {number_series_mod.LABELS[k]}")
+            n_all = len(keys)
+            print(f"  {n_all + 1}) All types mixed")
+            print(f"  {n_all + 2}) Custom subset")
+            print("  q) Back")
+            choice = input(clr("Choose: ", C.YELLOW)).strip().lower()
+
+            if choice == "q":
+                return
+
+            if not choice.isdigit():
+                print(clr("Invalid choice.", C.RED))
+                continue
+
+            c = int(choice)
+            if 1 <= c <= n_all:
+                types = [keys[c - 1]]
+            elif c == n_all + 1:
+                types = keys
+            elif c == n_all + 2:
+                types = self._pick_subset(keys, number_series_mod.LABELS)
+                if not types:
+                    continue
+            else:
+                print(clr("Invalid choice.", C.RED))
+                continue
+
             try:
                 n = int(input("Questions? [default 20]: ").strip() or "20")
             except ValueError:
                 n = 20
-            try:
-                cd = int(input("Cooldown? [default 5]: ").strip() or "5")
-            except ValueError:
-                cd = 5
 
-            questions = generate_meta_questions(types, n, cooldown=cd)
-            self._run_questions(questions, f"meta:{label}", "meta")
+            questions = generate_number_series_questions(types, n)
+            label = "series:" + ",".join(types)
+            self._run_questions(questions, label, "meta")
 
+    # ---------- Custom quiz bank submenu ----------
     def list_quiz_databases(self):
         QUIZ_DATA_DIR.mkdir(parents=True, exist_ok=True)
         files = sorted(QUIZ_DATA_DIR.glob("*.json"))
@@ -351,7 +524,7 @@ class CLIUserInterface:
 
     def quiz_menu(self):
         while True:
-            print(clr("\n── Quiz ──", C.BOLD))
+            print(clr("\n── Custom Quiz Bank ──", C.BOLD))
             print(f"  Loaded: {len(self.questions)} questions")
             print("  1) List quiz databases")
             print("  2) Load a quiz database")
@@ -382,11 +555,12 @@ class CLIUserInterface:
             else:
                 print(clr("Invalid choice.", C.RED))
 
+    # ---------- Main ----------
     def main_menu(self):
         print(clr("\n══ Coding-Decoding Trainer ══", C.BOLD))
         print(f"  User: {clr(self.profile.username, C.CYAN)}")
-        print("  1) Meta — alphabet drill")
-        print("  2) Quiz")
+        print("  1) Meta training")
+        print("  2) Custom quiz bank")
         print("  3) Profile summary")
         print("  4) Last session")
         print("  q) Quit")
@@ -437,9 +611,6 @@ class CLIUserInterface:
                 print(clr("Invalid choice.", C.RED))
 
 
-# ------------------------------------------------------------------
-# Entry
-# ------------------------------------------------------------------
 def main():
     ensure_dirs()
     username = input("Username [default]: ").strip() or "default"
