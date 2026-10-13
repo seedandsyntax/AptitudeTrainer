@@ -1,20 +1,25 @@
 """Coding-decoding question generators.
 
-Each generator takes a word and returns a dict with keys:
-    prompt, answer, hint, qtype
+Six word-based subtypes use GENERATORS (word → dict).
+Two non-word subtypes (comparison, substitution) use PARAMS + BUILDERS.
 """
 
 import random
 
 
 WORDS = [
-    "GARDEN", "ROCKET", "PLANET", "CAMERA", "WINDOW", "ORANGE", "POTATO",
+    "GARDEN", "SILENT", "ROCKET", "PLANET", "CAMERA", "WINDOW", "ORANGE",
     "YELLOW", "PENCIL", "SYSTEM", "NUMBER", "LAPTOP", "FRIEND", "MOTHER",
     "FATHER", "SCHOOL", "STUDENT", "TEACHER", "MUSIC", "EFFORT", "WINTER",
     "SUMMER", "SPRING", "AUTUMN", "FOREST", "RIVER", "MOUNTAIN", "VALLEY",
     "ISLAND", "DESERT", "CASTLE", "BRIDGE", "TEMPLE", "MARKET", "STATION",
-    "MONICA", "EVERETT", "SILENT", "WITCH", "ABYSS", "COSMOS", "WITHER"
 ]
+
+FILLER = ["la", "che", "ne", "pa", "da", "ko", "rat", "lo", "to",
+          "pe", "do", "ga", "mi", "re", "bo"]
+
+_SAMPLE_WORDS = ["failure", "key", "success", "money", "gold", "silver",
+                 "water", "fire", "earth", "wind", "light", "dark"]
 
 
 def _lhs(ch):
@@ -25,9 +30,6 @@ def _rhs(ch):
     return 27 - _lhs(ch)
 
 
-# ------------------------------------------------------------------
-# Encoders
-# ------------------------------------------------------------------
 def encode_reverse_digits(word):
     return "".join(f"{_lhs(c):02d}"[::-1] for c in word)
 
@@ -59,11 +61,7 @@ def encode_rhs_replace(word):
     return "".join(chr(_rhs(c) + 64) for c in word)
 
 
-# ------------------------------------------------------------------
-# Prompt builder
-# ------------------------------------------------------------------
 def _build_prompt(target, encoder, n_examples):
-    """Return a dynamic prompt with 1 or 2 worked examples, distinct from target."""
     pool = [w for w in WORDS if w != target]
     examples = random.sample(pool, n_examples)
     clauses = [f"{e} is coded as {encoder(e)}" for e in examples]
@@ -72,13 +70,9 @@ def _build_prompt(target, encoder, n_examples):
 
 
 def _n_examples():
-    # ~60% single-example, ~40% two-example, so both formats are drilled
     return 1 if random.random() < 0.6 else 2
 
 
-# ------------------------------------------------------------------
-# Generators
-# ------------------------------------------------------------------
 def gen_reverse_digits(word):
     return {
         "prompt": _build_prompt(word, encode_reverse_digits, _n_examples()),
@@ -133,6 +127,66 @@ def gen_rhs_replace(word):
     }
 
 
+# ------------------------------------------------------------------
+# Non-word subtypes
+# ------------------------------------------------------------------
+def _build_comparison(p):
+    words, codes, seed = p
+    rng = random.Random(seed)
+    c1 = codes[0:3][:]
+    c2 = codes[0:1] + codes[3:5]
+    c3 = codes[1:2] + codes[3:4] + codes[5:6]
+    rng.shuffle(c1)
+    rng.shuffle(c2)
+    rng.shuffle(c3)
+    prompt = (
+        f"In a certain code:\n"
+        f"  '{words[0]} {words[1]} {words[2]}' is written as "
+        f"'{' '.join(c1)}'\n"
+        f"  '{words[0]} {words[3]} {words[4]}' is written as "
+        f"'{' '.join(c2)}'\n"
+        f"  '{words[1]} {words[3]} {words[5]}' is written as "
+        f"'{' '.join(c3)}'\n"
+        f"What is the code for '{words[0]}'?"
+    )
+    return {
+        "prompt": prompt,
+        "answer": codes[0],
+        "hint": "Find the code common to the first two sentences.",
+        "qtype": "comparison",
+    }
+
+
+_SUBSTITUTION_CHAINS = [
+    ["cat", "dog", "rat", "bat", "cow"],
+    ["sun", "moon", "star", "sky", "sea"],
+    ["red", "blue", "green", "yellow", "pink"],
+    ["king", "queen", "prince", "princess", "duke"],
+    ["rice", "wheat", "barley", "oats", "corn"],
+    ["car", "bus", "train", "plane", "ship"],
+]
+
+
+def _build_substitution(p):
+    chain = p[0]
+    lines = [
+        f"In a certain language, {a} is called {b}."
+        for a, b in zip(chain[:-1], chain[1:])
+    ]
+    prompt = "\n".join(lines) + (
+        f"\nWhat is '{chain[0]}' called in this language?"
+    )
+    return {
+        "prompt": prompt,
+        "answer": chain[1].lower(),
+        "hint": "Direct lookup: the first substitution is the answer.",
+        "qtype": "substitution",
+    }
+
+
+# ------------------------------------------------------------------
+# Public dicts
+# ------------------------------------------------------------------
 GENERATORS = {
     "reverse_digits":      gen_reverse_digits,
     "digit_sum":           gen_digit_sum,
@@ -142,6 +196,27 @@ GENERATORS = {
     "rhs_replace":         gen_rhs_replace,
 }
 
+WORD_BASED = set(GENERATORS.keys())
+
+_COMPARISON_PARAMS = []
+for seed in range(60):
+    rng = random.Random(seed)
+    _COMPARISON_PARAMS.append(
+        (rng.sample(_SAMPLE_WORDS, 6), rng.sample(FILLER, 6), seed)
+    )
+
+_SUBSTITUTION_PARAMS = [(chain,) for chain in _SUBSTITUTION_CHAINS]
+
+PARAMS = {
+    "comparison":   _COMPARISON_PARAMS,
+    "substitution": _SUBSTITUTION_PARAMS,
+}
+
+BUILDERS = {
+    "comparison":   _build_comparison,
+    "substitution": _build_substitution,
+}
+
 LABELS = {
     "reverse_digits":      "Reverse digits",
     "digit_sum":           "Digit sum",
@@ -149,4 +224,6 @@ LABELS = {
     "shift_alternate":     "Shift +1,+2 alternating",
     "split_reverse_shift": "Split + reverse halves + shift +2",
     "rhs_replace":         "RHS position replacement",
+    "comparison":          "Comparison across sentences",
+    "substitution":        "Word substitution chain",
 }

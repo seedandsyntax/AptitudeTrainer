@@ -1,8 +1,5 @@
 """
-Training core: question generation, fairness pickers, registry, profiles.
-
-UI and entry point live in alphabets_pos_trainer.py and AptitudeTrainer.py.
-This module knows nothing about menus, colors, or terminal output.
+Training core: generation, pickers, registry, profiles.
 """
 
 import json
@@ -24,6 +21,8 @@ import average_mod
 import number_system_mod
 import venn_mod
 import syllogism_mod
+import sitting_arrangement_mod
+import alphabet_series_mod
 
 
 ALPHABETS = "abcdefghijklmnopqrstuvwxyz"
@@ -40,9 +39,6 @@ def ensure_dirs():
     QUIZ_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
-# ------------------------------------------------------------------
-# Question
-# ------------------------------------------------------------------
 class Question:
     def __init__(self, prompt, answer, hint="", qtype="", tolerance=None):
         self.prompt = prompt
@@ -78,9 +74,6 @@ class Question:
         }
 
 
-# ------------------------------------------------------------------
-# Pickers
-# ------------------------------------------------------------------
 class CooldownPicker:
     def __init__(self, pool, cooldown=3):
         self.pool = list(pool)
@@ -97,8 +90,6 @@ class CooldownPicker:
 
 
 class Bag:
-    """Draw every item once per cycle, then reshuffle."""
-
     def __init__(self, items):
         self.items = list(items)
         self._deck = []
@@ -110,9 +101,6 @@ class Bag:
         return self._deck.pop()
 
 
-# ------------------------------------------------------------------
-# Alphabet generators
-# ------------------------------------------------------------------
 def q_lhs_pos(letter):
     return Question(
         prompt=f"LHS position of '{letter.upper()}'?",
@@ -167,14 +155,11 @@ def _all_subsets(atoms):
 ALPHABET_MODES = _all_subsets(ALPHABET_ATOMS)
 
 
-# ------------------------------------------------------------------
-# Cross-family registry
-# ------------------------------------------------------------------
 def all_types_registry():
     reg = {}
     for k in ALPHABET_GENERATORS:
         reg[f"alphabet:{k}"] = ("alphabet", k, f"[A] {ALPHABET_ATOMS[k]}")
-    for k in code_decode_mod.GENERATORS:
+    for k in code_decode_mod.LABELS:
         reg[f"coding:{k}"] = ("coding", k, f"[C] {code_decode_mod.LABELS[k]}")
     for k in number_series_mod.BUILDERS:
         reg[f"series:{k}"] = ("series", k, f"[S] {number_series_mod.LABELS[k]}")
@@ -200,12 +185,13 @@ def all_types_registry():
         reg[f"venn:{k}"] = ("venn", k, f"[E] {venn_mod.LABELS[k]}")
     for k in syllogism_mod.BUILDERS:
         reg[f"syllogism:{k}"] = ("syllogism", k, f"[L] {syllogism_mod.LABELS[k]}")
+    for k in sitting_arrangement_mod.BUILDERS:
+        reg[f"sitting:{k}"] = ("sitting", k, f"[T] {sitting_arrangement_mod.LABELS[k]}")
+    for k in alphabet_series_mod.BUILDERS:
+        reg[f"alpha_series:{k}"] = ("alpha_series", k, f"[Z] {alphabet_series_mod.LABELS[k]}")
     return reg
 
 
-# ------------------------------------------------------------------
-# Per-family generators
-# ------------------------------------------------------------------
 def generate_alphabet_questions(types, count, cooldown=5):
     picker = CooldownPicker(ALPHABETS, cooldown=cooldown)
     return [
@@ -215,12 +201,29 @@ def generate_alphabet_questions(types, count, cooldown=5):
 
 
 def generate_coding_questions(types, count, cooldown=5):
-    picker = CooldownPicker(code_decode_mod.WORDS, cooldown=cooldown)
+    word_types = [t for t in types if t in code_decode_mod.WORD_BASED]
+    non_word_types = [t for t in types if t not in code_decode_mod.WORD_BASED]
+
+    picker = None
+    if word_types:
+        picker = CooldownPicker(code_decode_mod.WORDS, cooldown=cooldown)
+
     out = []
     for _ in range(count):
-        word = picker.pick()
-        qtype = random.choice(types)
-        out.append(Question(**code_decode_mod.GENERATORS[qtype](word)))
+        if word_types and non_word_types:
+            t = random.choice(types)
+        elif word_types:
+            t = random.choice(word_types)
+        else:
+            t = random.choice(non_word_types)
+
+        if t in code_decode_mod.WORD_BASED:
+            word = picker.pick()
+            data = code_decode_mod.GENERATORS[t](word)
+        else:
+            param = random.choice(code_decode_mod.PARAMS[t])
+            data = code_decode_mod.BUILDERS[t](param)
+        out.append(Question(**data))
     return out
 
 
@@ -307,27 +310,38 @@ def generate_syllogism_questions(types, count):
     )
 
 
-# ------------------------------------------------------------------
-# Unified cross-family generator
-# ------------------------------------------------------------------
+def generate_sitting_questions(types, count):
+    return _generate_parametrized(
+        sitting_arrangement_mod, types, count, strip_difficulty=False
+    )
+
+
+def generate_alphabet_series_questions(types, count):
+    return _generate_parametrized(
+        alphabet_series_mod, types, count, strip_difficulty=False
+    )
+
+
 def generate_mixed_questions(fq_keys, count):
     type_picker = CooldownPicker(fq_keys, cooldown=min(3, len(fq_keys) - 1))
     letter_picker = CooldownPicker(ALPHABETS, cooldown=5)
     word_picker = CooldownPicker(code_decode_mod.WORDS, cooldown=5)
     bags = {}
     mod_for = {
-        "series":        number_series_mod,
-        "clock":         clock_mod,
-        "cube":          cube_mod,
-        "blood":         blood_relations_mod,
-        "direction":     direction_mod,
-        "hcf_lcm":       hcf_lcm_mod,
-        "calendar":      calendar_mod,
-        "percentage":    percentage_mod,
-        "average":       average_mod,
+        "series":       number_series_mod,
+        "clock":        clock_mod,
+        "cube":         cube_mod,
+        "blood":        blood_relations_mod,
+        "direction":    direction_mod,
+        "hcf_lcm":      hcf_lcm_mod,
+        "calendar":     calendar_mod,
+        "percentage":   percentage_mod,
+        "average":      average_mod,
         "number_system": number_system_mod,
-        "venn":          venn_mod,
-        "syllogism":     syllogism_mod,
+        "venn":         venn_mod,
+        "syllogism":    syllogism_mod,
+        "sitting":      sitting_arrangement_mod,
+        "alpha_series": alphabet_series_mod,
     }
 
     out = []
@@ -338,23 +352,25 @@ def generate_mixed_questions(fq_keys, count):
         if family == "alphabet":
             out.append(ALPHABET_GENERATORS[key](letter_picker.pick()))
         elif family == "coding":
-            word = word_picker.pick()
-            data = code_decode_mod.GENERATORS[key](word)
+            if key in code_decode_mod.WORD_BASED:
+                word = word_picker.pick()
+                data = code_decode_mod.GENERATORS[key](word)
+            else:
+                param = random.choice(code_decode_mod.PARAMS[key])
+                data = code_decode_mod.BUILDERS[key](param)
             out.append(Question(**data))
         else:
             mod = mod_for[family]
-            if key not in bags:
-                bags[key] = Bag(mod.PARAMS[key])
-            param = bags[key].pick()
+            tag = f"{family}:{key}"
+            if tag not in bags:
+                bags[tag] = Bag(mod.PARAMS[key])
+            param = bags[tag].pick()
             data = mod.BUILDERS[key](param)
             data.pop("difficulty", None)
             out.append(Question(**data))
     return out
 
 
-# ------------------------------------------------------------------
-# Profile
-# ------------------------------------------------------------------
 class Profile:
     def __init__(self, username):
         self.username = username

@@ -1,7 +1,5 @@
-"""
-CLI UI for the aptitude trainer.
+"""CLI UI for the aptitude trainer.
 
-All generation, pickers, and profile persistence live in trainer_core.
 Entry point is AptitudeTrainer.py.
 """
 
@@ -23,11 +21,10 @@ import average_mod
 import number_system_mod
 import venn_mod
 import syllogism_mod
+import sitting_arrangement_mod
+import alphabet_series_mod
 
 
-# ------------------------------------------------------------------
-# Colors
-# ------------------------------------------------------------------
 class C:
     RESET = "\033[0m"
     BOLD = "\033[1m"
@@ -42,9 +39,6 @@ def clr(t, c):
     return f"{c}{t}{C.RESET}"
 
 
-# ------------------------------------------------------------------
-# UI
-# ------------------------------------------------------------------
 class CLIUserInterface:
     def __init__(self, username="default"):
         self.profile = core.Profile(username)
@@ -158,11 +152,8 @@ class CLIUserInterface:
     def _family_menu(self, title, mod, generator, default_n=20):
         while True:
             print(clr(f"\n── {title} ──", C.BOLD))
-            keys = (
-                list(mod.BUILDERS.keys())
-                if hasattr(mod, "BUILDERS")
+            keys = list(mod.BUILDERS.keys()) if hasattr(mod, "BUILDERS") \
                 else list(mod.GENERATORS.keys())
-            )
             labels = mod.LABELS
 
             for i, k in enumerate(keys, 1):
@@ -208,7 +199,7 @@ class CLIUserInterface:
     def meta_menu(self):
         while True:
             print(clr("\n── Meta Training ──", C.BOLD))
-            print("   1) Alphabet drills")
+            print("   1) Alphabet position drills")
             print("   2) Coding-Decoding drills")
             print("   3) Number Series drills")
             print("   4) Clock drills")
@@ -222,7 +213,9 @@ class CLIUserInterface:
             print("  12) Number System drills")
             print("  13) Venn / Set Theory drills")
             print("  14) Syllogism drills")
-            print("  15) Unified mixed drills (any family)")
+            print("  15) Sitting Arrangement drills")
+            print("  16) Alphabet Series / Letter Pairs")
+            print("  17) Unified mixed drills (any family)")
             print("   q) Back to main menu")
             choice = input(clr("Choose: ", C.YELLOW)).strip().lower()
 
@@ -257,6 +250,10 @@ class CLIUserInterface:
             elif choice == "14":
                 self.syllogism_menu()
             elif choice == "15":
+                self.sitting_menu()
+            elif choice == "16":
+                self.alphabet_series_menu()
+            elif choice == "17":
                 self.mixed_menu()
             else:
                 print(clr("Invalid choice.", C.RED))
@@ -286,7 +283,7 @@ class CLIUserInterface:
         self._family_menu(
             "Coding-Decoding Drills",
             code_decode_mod,
-            lambda t, n: core.generate_coding_questions(t, n),
+            core.generate_coding_questions,
             default_n=20,
         )
 
@@ -383,6 +380,22 @@ class CLIUserInterface:
             "Syllogism Drills",
             syllogism_mod,
             core.generate_syllogism_questions,
+            default_n=10,
+        )
+
+    def sitting_menu(self):
+        self._family_menu(
+            "Sitting Arrangement Drills",
+            sitting_arrangement_mod,
+            core.generate_sitting_questions,
+            default_n=5,
+        )
+
+    def alphabet_series_menu(self):
+        self._family_menu(
+            "Alphabet Series / Letter Pairs",
+            alphabet_series_mod,
+            core.generate_alphabet_series_questions,
             default_n=10,
         )
 
